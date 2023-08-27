@@ -1,9 +1,9 @@
-import React, { Component } from 'react';
+import React, { useState, useEffect } from 'react';
 
 import { Notify } from 'notiflix';
 
 import { SearchBar } from './SearchBar/SearchBar';
-import { AppContainer } from './App.style';
+import { AppContainer, ErrorMessage } from './App.style';
 import { ImageGallery } from './ImageGallery/ImageGallery';
 import { Loader } from './Loader/Loader';
 import { Button } from './Button/Button';
@@ -12,110 +12,96 @@ import { getImages } from 'services/APIpixabay';
 import { GlobalStyle } from './GlobalStyle';
 import { Layout } from './Layout';
 
-export class App extends Component {
-  state = {
-    images: [],
-    query: '',
-    page: 1,
-    error: null,
-    isLoading: false,
-    totalImages: 0,
-  };
+export const App = () => {
+  const [images, setImages] = useState([]);
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [totalImages, setTotalImages] = useState(0);
 
-  componentDidUpdate(_, prevState) {
-    if (
-      prevState.query !== this.state.query ||
-      prevState.page !== this.state.page
-    ) {
-      this.fetchImages();
-    }
-  }
+  const lastPage = Math.ceil(totalImages / 12);
 
-  async fetchImages() {
-    const { query, page } = this.state;
-    const options = { query, page };
+  useEffect(() => {
+    async function fetchImages() {
+      if (query === '') return;
 
-    try {
-      this.setState({ isLoading: true });
+      const options = { query, page };
 
-      const { hits, totalHits } = await getImages(options);
+      try {
+        setError(false);
+        setIsLoading(prevState => !prevState);
 
-      const nextImages = hits.map(
-        ({ id, webformatURL, tags, largeImageURL }) => ({
-          id,
-          webformatURL,
-          tags,
-          largeImageURL,
-        })
-      );
+        const { hits, totalHits } = await getImages(options);
 
-      if (page === 1) {
-        if (!nextImages.length) {
-          Notify.failure(`There is no result for ${query}`);
-          return;
+        const nextImages = hits.map(
+          ({ id, webformatURL, tags, largeImageURL }) => ({
+            id,
+            webformatURL,
+            tags,
+            largeImageURL,
+          })
+        );
+
+        if (page === 1) {
+          if (!nextImages.length) {
+            Notify.error(`There is no result for "${query}"`);
+            return;
+          }
+
+          setImages([...nextImages]);
+
+          setTotalImages(totalHits);
+
+          if (page === lastPage) {
+            Notify.success(`You have got all images for request ${query}`);
+          }
+        } else {
+          setImages(prevState => [...prevState, ...nextImages]);
         }
-
-        this.setState({ images: nextImages, totalImages: totalHits });
-      } else {
-        this.setState(({ images }) => ({
-          images: [...images, ...nextImages],
-        }));
+      } catch (err) {
+        if (err.code !== 'ERR_CANCELED') {
+          setError(err);
+        }
+      } finally {
+        setIsLoading(prevState => !prevState);
       }
-
-      this.checkLastPage({
-        page,
-        totalImages: totalHits,
-      });
-    } catch (error) {
-      this.setState({ error });
-      Notify.failure(error.message);
-    } finally {
-      this.setState({ isLoading: false });
     }
-  }
 
-  handleSubmit = value => {
-    this.setState({
-      images: [],
-      query: value,
-      page: 1,
-      totalImages: 0,
-    });
+    fetchImages();
+  }, [page, query, lastPage]);
+
+  const handleSubmit = value => {
+    setImages([]);
+    setQuery(value);
+    setPage(1);
+    setTotalImages(0);
   };
 
-  handleLoadMore = () => {
-    this.setState(prev => ({ page: prev.page + 1 }));
+  const handleLoadMore = () => {
+    setPage(prevState => prevState + 1);
   };
 
-  checkLastPage({ page, totalImages }) {
-    const { query } = this.state;
-    const lastPage = Math.ceil(totalImages / 12);
+  const loadMoreVisible =
+    !isLoading && images.length !== 0 && images.length < totalImages;
 
-    if (page === lastPage) {
-      Notify.success(`You have got all images for request ${query}`);
-    }
-  }
+  return (
+    <Layout>
+      <AppContainer>
+        <GlobalStyle />
 
-  render() {
-    const { images, totalImages, isLoading } = this.state;
+        <SearchBar onSubmit={handleSubmit} />
+        {images.length > 0 && <ImageGallery images={images} />}
 
-    const loadMoreVisible =
-      !isLoading && images.length !== 0 && images.length < totalImages;
+        {error && (
+          <ErrorMessage>
+            Oops, something went wrong... Try again later!
+          </ErrorMessage>
+        )}
 
-    return (
-      <Layout>
-        <AppContainer>
-          <GlobalStyle />
-
-          <SearchBar onSubmit={this.handleSubmit} />
-
-          <ImageGallery images={images} />
-
-          {loadMoreVisible && <Button onClick={this.handleLoadMore} />}
-
-          {isLoading && <Loader />}
-        </AppContainer>
-      </Layout>
-    );
-  }
-}
+        {loadMoreVisible && <Button onClick={handleLoadMore} />}
+        {isLoading && <Loader />}
+      </AppContainer>
+    </Layout>
+  );
+};
